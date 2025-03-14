@@ -1,0 +1,5 @@
+webbrowser  # Standard library, no need to install
+requests
+json  # Standard library, no need to install
+flask
+google-cloud-bigquery
