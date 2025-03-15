@@ -1,7 +1,26 @@
 import flask
-from flask import Flask, request, render_template_string, jsonify
+from flask import Flask, send_file, request, render_template_string, jsonify
 from google.cloud import bigquery
 import random
+from google.cloud import storage
+import os
+
+
+# Define the Google Cloud Storage bucket name
+BUCKET_NAME = "bdcc-imagebucket"
+
+# Initialize Google Cloud Storage Client
+storage_client = storage.Client()
+bucket_name = "bdcc-imagebucket"  # Your GCS bucket name
+
+# Initialize BigQuery Client
+bigquery_client = bigquery.Client()
+dataset_id = "DatasetBDCC"
+table_id = "Images"
+full_table_id = f"planar-unity-416918.{dataset_id}.{table_id}"
+
+# Initialize the Google Cloud Storage client
+bucket = storage_client.bucket(BUCKET_NAME)
 
 app = Flask(__name__)
 bigquery_client = bigquery.Client()
@@ -61,7 +80,7 @@ def get_patient(subject_id):
     """Fetch demographic information of a patient in table format."""
     query = f"""
     SELECT subject_id, gender, dob
-    FROM `bdcc25-452114.DatasetBDCC.Patients`
+    FROM `planar-unity-416918.DatasetBDCC.Patients`
     WHERE subject_id = {subject_id}
     """
     results = run_query(query)
@@ -75,7 +94,7 @@ def get_admissions(subject_id):
     """Returns a list of hospital admissions in table format."""
     query = f"""
     SELECT hadm_id, admittime, dischtime, diagnosis
-    FROM `bdcc25-452114.DatasetBDCC.Admissions`
+    FROM `planar-unity-416918.DatasetBDCC.Admissions`
     WHERE subject_id = {subject_id}
     ORDER BY admittime DESC
     """
@@ -84,6 +103,82 @@ def get_admissions(subject_id):
     headers = ["HADM ID", "Admission Time", "Discharge Time", "Diagnosis"]
     return render_html_table("Admissions List", data, headers)
 
+
+@app.route("/upload_image", methods=["POST"])
+def upload_image():
+    """Uploads an image to Google Cloud Storage and stores its metadata in BigQuery."""
+    if "image" not in request.files or "subject_id" not in request.form:
+        return jsonify({"error": "Image file and subject_id are required"}), 400
+
+    image_file = request.files["image"]
+    subject_id = request.form["subject_id"]
+
+    if image_file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
+
+    # Upload image to GCS
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(f"xray/{image_file.filename}")  # Store in 'xray/' directory
+    blob.upload_from_file(image_file, content_type=image_file.content_type)
+
+    # Get public URL
+    image_url = f"https://storage.googleapis.com/{bucket_name}/xray/{image_file.filename}"
+
+    # Insert into BigQuery
+    row = [
+        {
+            "subject_id": int(subject_id),
+            "image_url": image_url,
+            "image_name": image_file.filename
+        }
+    ]
+
+    errors = bigquery_client.insert_rows_json(full_table_id, row)
+    if errors:
+        return jsonify({"error": "Error inserting data into BigQuery", "details": errors}), 500
+
+    return jsonify({"message": "Image uploaded successfully", "image_url": image_url}), 201
+
+
+@app.route("/rest/images", methods=["GET"])
+def list_all_images():
+    """Lists all images stored in BigQuery."""
+    query = """
+    SELECT subject_id, image_name, image_url
+    FROM `planar-unity-416918.DatasetBDCC.Images`
+    ORDER BY subject_id ASC
+    """
+
+    result = run_query(query)
+
+    images = [{"subject_id": row["subject_id"], "image_name": row["image_name"], "image_url": row["image_url"]} for row
+              in result]
+
+    if not images:
+        return jsonify({"message": "No images found"}), 404
+
+    return jsonify(images), 200
+
+
+@app.route("/rest/images/download/<image_name>", methods=["GET"])
+def download_image(image_name):
+    """Generates a signed URL for an image in Google Cloud Storage."""
+    bucket_name = "bdcc-imagebucket"
+    blob_name = f"xray/{image_name}"  # Ensure correct path inside the bucket
+
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+
+    if not blob.exists():
+        return jsonify({"error": "Image not found"}), 404
+
+    signed_url = blob.generate_signed_url(expiration=600)  # Valid for 10 mins
+
+    return jsonify({"image_url": signed_url})
+
+
+
 # 3. LIST PATIENTS WITH LONGEST STAYS (HTML Table)
 @app.route("/rest/patients/longest_stays", methods=["GET"])
 def get_longest_stays():
@@ -91,7 +186,7 @@ def get_longest_stays():
     query = """
     SELECT subject_id, hadm_id, admittime, dischtime, 
            TIMESTAMP_DIFF(dischtime, admittime, HOUR) AS stay_hours
-    FROM `bdcc25-452114.DatasetBDCC.Admissions`
+    FROM `planar-unity-416918.DatasetBDCC.Admissions`
     WHERE dischtime IS NOT NULL
     ORDER BY stay_hours DESC
     LIMIT 10
@@ -107,7 +202,7 @@ def list_patients():
     """Fetches a limited list of patients in table format."""
     query = """
     SELECT subject_id, gender, dob
-    FROM `bdcc25-452114.DatasetBDCC.Patients`
+    FROM `planar-unity-416918.DatasetBDCC.Patients`
     """
     results = run_query(query)
     data = [list(row.values()) for row in results]
@@ -124,9 +219,9 @@ def create_patient():
 
     # Converter `dob` de "YYYY-MM-DD" para TIMESTAMP no BigQuery
     dob_timestamp = f"{data['dob']} 00:00:00"
-    
+
     # Verificar se o paciente já existe
-    check_query = "SELECT subject_id FROM `bdcc25-452114.DatasetBDCC.Patients` WHERE subject_id = @subject_id"
+    check_query = "SELECT subject_id FROM `planar-unity-416918.DatasetBDCC.Patients` WHERE subject_id = @subject_id"
     params = [bigquery.ScalarQueryParameter("subject_id", "INT64", data['subject_id'])]
     existing = run_query(check_query, params)
 
@@ -135,7 +230,7 @@ def create_patient():
 
     # Inserir paciente convertendo DOB para TIMESTAMP corretamente
     insert_query = """
-    INSERT INTO `bdcc25-452114.DatasetBDCC.Patients` (subject_id, gender, dob)
+    INSERT INTO `planar-unity-416918.DatasetBDCC.Patients` (subject_id, gender, dob)
     VALUES (@subject_id, @gender, TIMESTAMP(@dob))
     """
     params = [
@@ -159,10 +254,10 @@ def create_admission():
     # Converter `dob` de "YYYY-MM-DD" para TIMESTAMP no BigQuery
     dob_timestamp2 = f"{data['admittime']}"
     dob_timestamp3 = f"{data['dischtime']}"
-    
-    
+
+
     # Verificar se a admission já existe
-    check_query = "SELECT subject_id FROM `bdcc25-452114.DatasetBDCC.Admissions` WHERE hadm_id = @hadm_id"
+    check_query = "SELECT subject_id FROM `planar-unity-416918.DatasetBDCC.Admissions` WHERE hadm_id = @hadm_id"
     params = [bigquery.ScalarQueryParameter("hadm_id", "INT64", data['hadm_id'])]
     existing = run_query(check_query, params)
 
@@ -170,14 +265,14 @@ def create_admission():
         return jsonify({"error": "Admission already exists"}), 409  # HTTP 409 Conflict
 
     insert_query = """
-    INSERT INTO `bdcc25-452114.DatasetBDCC.Admissions` (hadm_id, subject_id, admittime, dischtime, diagnosis)
+    INSERT INTO `planar-unity-416918.DatasetBDCC.Admissions` (hadm_id, subject_id, admittime, dischtime, diagnosis)
     VALUES (@hadm_id, @subject_id, TIMESTAMP(@admittime), TIMESTAMP(@dischtime), @diagnosis)
     """
     params = [
     bigquery.ScalarQueryParameter("hadm_id", "INT64", data['hadm_id']),
-    bigquery.ScalarQueryParameter("subject_id", "INT64", data['subject_id']), 
+    bigquery.ScalarQueryParameter("subject_id", "INT64", data['subject_id']),
     bigquery.ScalarQueryParameter("admittime", "STRING", dob_timestamp2),
-    bigquery.ScalarQueryParameter("dischtime", "STRING", dob_timestamp3), 
+    bigquery.ScalarQueryParameter("dischtime", "STRING", dob_timestamp3),
     bigquery.ScalarQueryParameter("diagnosis", "STRING", data['diagnosis'])
 ]
 
@@ -189,9 +284,9 @@ def create_admission():
 @app.route("/rest/patients/<int:subject_id>", methods=["PUT"])
 def update_patient(subject_id):
     """Updates specific patient details dynamically."""
-    data = request.get_json(silent=True) 
+    data = request.get_json(silent=True)
 
-    print("Received Data:", data)  
+    print("Received Data:", data)
 
     if not data:
         return jsonify({"error": "No valid JSON data received"}), 400
@@ -204,7 +299,7 @@ def update_patient(subject_id):
         params.append(bigquery.ScalarQueryParameter("gender", "STRING", data["gender"]))
 
     if "dob" in data and data["dob"]:
-        dob_timestamp = f"{data['dob']} 00:00:00" 
+        dob_timestamp = f"{data['dob']} 00:00:00"
         update_fields.append("dob = TIMESTAMP(@dob)")
         params.append(bigquery.ScalarQueryParameter("dob", "STRING", dob_timestamp))
 
@@ -212,7 +307,7 @@ def update_patient(subject_id):
         return jsonify({"error": "No valid fields to update"}), 400
 
     query = f"""
-    UPDATE `bdcc25-452114.DatasetBDCC.Patients`
+    UPDATE `planar-unity-416918.DatasetBDCC.Patients`
     SET {", ".join(update_fields)}
     WHERE subject_id = @subject_id
     """
@@ -229,17 +324,17 @@ def update_patient(subject_id):
 @app.route("/rest/patients/<int:subject_id>", methods=["DELETE"])
 def delete_patient(subject_id):
     """Deletes a patient and anonymizes their admissions."""
-    
+
     # Primeiro, verificar se o paciente existe
-    check_query = "SELECT subject_id FROM `bdcc25-452114.DatasetBDCC.Patients` WHERE subject_id = @subject_id"
+    check_query = "SELECT subject_id FROM `planar-unity-416918.DatasetBDCC.Patients` WHERE subject_id = @subject_id"
     params = [bigquery.ScalarQueryParameter("subject_id", "INT64", subject_id)]
     existing = run_query(check_query, params)
 
     if existing.total_rows == 0:
-        return jsonify({"error": "Patient not found"}), 404  
+        return jsonify({"error": "Patient not found"}), 404
 
     anonymize_admissions_query = """
-    UPDATE `bdcc25-452114.DatasetBDCC.Admissions`
+    UPDATE `planar-unity-416918.DatasetBDCC.Admissions`
     SET subject_id = NULL
     WHERE subject_id = @subject_id
     """
@@ -247,7 +342,7 @@ def delete_patient(subject_id):
 
     # Excluir o paciente
     delete_patient_query = """
-    DELETE FROM `bdcc25-452114.DatasetBDCC.Patients`
+    DELETE FROM `planar-unity-416918.DatasetBDCC.Patients`
     WHERE subject_id = @subject_id
     """
     run_query(delete_patient_query, params)
@@ -258,18 +353,18 @@ def delete_patient(subject_id):
 @app.route("/rest/admissions/<int:hadm_id>", methods=["DELETE"])
 def delete_admission(hadm_id):
     """Deletes a admission."""
-    
+
     # Primeiro, verificar se o admission existe
-    check_query = "SELECT hadm_id FROM `bdcc25-452114.DatasetBDCC.Admissions` WHERE hadm_id = @hadm_id"
+    check_query = "SELECT hadm_id FROM `planar-unity-416918.DatasetBDCC.Admissions` WHERE hadm_id = @hadm_id"
     params = [bigquery.ScalarQueryParameter("hadm_id", "INT64", hadm_id)]
     existing = run_query(check_query, params)
 
     if existing.total_rows == 0:
-        return jsonify({"error": "Admission not found"}), 404  
+        return jsonify({"error": "Admission not found"}), 404
 
     # Excluir o paciente
     delete_admission_query = """
-    DELETE FROM `bdcc25-452114.DatasetBDCC.Admissions`
+    DELETE FROM `planar-unity-416918.DatasetBDCC.Admissions`
     WHERE hadm_id = @hadm_id
     """
     run_query(delete_admission_query, params)
@@ -285,8 +380,8 @@ def create_question(subject_id):
         return jsonify({"error": "Missing required fields"}), 400
 
     insert_query = """
-    INSERT INTO `bdcc25-452114.DatasetBDCC.Questions` (question_id, subject_id, user_name, question_text, created_at)
-    VALUES (COALESCE((SELECT MAX(question_id) FROM `bdcc25-452114.DatasetBDCC.Questions`) + 1, 1), 
+    INSERT INTO `planar-unity-416918.DatasetBDCC.Questions` (question_id, subject_id, user_name, question_text, created_at)
+    VALUES (COALESCE((SELECT MAX(question_id) FROM `planar-unity-416918.DatasetBDCC.Questions`) + 1, 1), 
             @subject_id, @user_name, @question_text, CURRENT_TIMESTAMP())
     """
     params = [
@@ -305,7 +400,7 @@ def get_questions(subject_id):
     """Retorna todas as perguntas feitas a um paciente."""
     query = """
     SELECT user_name, question_text, created_at
-    FROM `bdcc25-452114.DatasetBDCC.Questions`
+    FROM `planar-unity-416918.DatasetBDCC.Questions`
     WHERE subject_id = @subject_id
     ORDER BY created_at DESC
     """
