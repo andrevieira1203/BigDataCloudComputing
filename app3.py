@@ -56,7 +56,7 @@ def render_html_table(title, data, headers):
             </tr>
             {% for row in data %}
             <tr>
-                {% for value in row.values() %}
+                {% for value in row %}
                 <td>{{ value }}</td>
                 {% endfor %}
             </tr>
@@ -69,7 +69,6 @@ def render_html_table(title, data, headers):
     </html>
     """
     return render_template_string(html_template, title=title, data=data, headers=headers)
-
 
 def should_return_json():
     """Determines if the request should return JSON (API call) or HTML (browser)."""
