@@ -86,7 +86,7 @@ def get_patient(subject_id):
     results = run_query(query)
     data = [list(row.values()) for row in results]
     headers = ["Subject ID", "Gender", "Date of Birth"]
-    return render_html_table("Patient Details", data, headers)
+    return render_html_table("Patient Details for patient {subject_id}", data, headers)
 
 # 2. LIST ALL ADMISSIONS FOR A PATIENT (HTML Table)
 @app.route("/rest/admissions/<int:subject_id>", methods=["GET"])
@@ -101,7 +101,7 @@ def get_admissions(subject_id):
     results = run_query(query)
     data = [list(row.values()) for row in results]
     headers = ["HADM ID", "Admission Time", "Discharge Time", "Diagnosis"]
-    return render_html_table("Admissions List", data, headers)
+    return render_html_table(f"Admissions List for patient {subject_id}", data, headers)
 
 # 3. LIST PATIENTS WITH LONGEST STAYS (HTML Table)
 @app.route("/rest/patients/longest_stays", methods=["GET"])
@@ -298,16 +298,23 @@ def delete_admission(hadm_id):
 # 10. Create a new question
 @app.route("/rest/patients/<int:subject_id>/question", methods=["POST"])
 def create_question(subject_id):
-    """Insere uma nova pergunta para um paciente."""
     data = request.json
     if not data or "user_name" not in data or "question_text" not in data:
         return jsonify({"error": "Missing required fields"}), 400
 
+    print(f"Received question for subject {subject_id}: {data['question_text']}")  # Adicionando um log
+
     insert_query = """
-    INSERT INTO `bdcc25-452114.DatasetBDCC.Questions` (question_id, subject_id, user_name, question_text, created_at)
-    VALUES (COALESCE((SELECT MAX(question_id) FROM `bdcc25-452114.DatasetBDCC.Questions`) + 1, 1), 
-            @subject_id, @user_name, @question_text, CURRENT_TIMESTAMP())
+        INSERT INTO `bdcc25-452114.DatasetBDCC.Questions` (question_id, subject_id, user_name, question_text, created_at)
+        VALUES (
+            (SELECT COALESCE(MAX(question_id), 0) + 1 FROM `bdcc25-452114.DatasetBDCC.Questions` WHERE subject_id = @subject_id),
+            @subject_id,
+            @user_name,
+            @question_text,
+            CURRENT_TIMESTAMP()
+        )
     """
+
     params = [
         bigquery.ScalarQueryParameter("subject_id", "INT64", subject_id),
         bigquery.ScalarQueryParameter("user_name", "STRING", data["user_name"]),
@@ -315,6 +322,7 @@ def create_question(subject_id):
     ]
 
     run_query(insert_query, params)
+
     return jsonify({"message": "Question added successfully", "data": data}), 201
 
 

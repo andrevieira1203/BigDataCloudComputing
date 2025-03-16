@@ -88,12 +88,6 @@ def get_user_choice():
             data = {"subject_id": int(subject_id), "hadm_id": int(hadm_id), "admittime": admittime,
                     "dischtime": dischtime, "diagnosis": diagnosis}
 
-        elif choice == "10":  # Create Question
-            subject_id = input("Enter Subject ID: ")
-            user_name = input("Enter Your Name: ").strip()
-            question_text = input("Enter Your Question: ").strip()
-            data = {"subject_id": int(subject_id), "user_name": user_name, "question_text": question_text}
-
         elif choice == "6":  # Update Patient
             subject_id = input("Enter Subject ID: ")
             data = {}
@@ -102,7 +96,7 @@ def get_user_choice():
                 data["gender"] = input("Enter New Gender (M/F): ").strip().upper()
 
             if input("Update Date of Birth? (Y/N): ").strip().lower() == "y":
-                data["dob"] = input("Enter New Date of Birth (YYYY-MM-DD): ").strip() + " 00:00:00"
+                data["dob"] = input("Enter New Date of Birth (YYYY-MM-DD): ").strip() 
 
             if data:
                 url = f"http://127.0.0.1:8080/rest/patients/{subject_id}"
@@ -123,6 +117,24 @@ def get_user_choice():
             if input(f"⚠ Confirm deletion of admission {hadm_id}? (yes/no): ").strip().lower() != "yes":
                 print("❌ Operation cancelled.")
                 return
+            
+        elif choice == "10":  # Create Question
+            subject_id = input("Enter Subject ID: ")
+            user_name = input("Enter Your Name: ").strip()
+            question_text = input("Enter Your Question: ").strip()
+
+            data = {
+                "subject_id": int(subject_id),
+                "user_name": user_name,
+                "question_text": question_text
+            }
+
+            # Enviar requisição POST para o Flask
+            url = f"http://127.0.0.1:8080/rest/patients/{subject_id}/question"  # O endpoint para criar a questão
+            
+        elif choice == "11":  # Listar questões de um paciente
+            subject_id = input("Enter Subject ID: ")
+            url = url_template.format(subject_id)
 
         elif choice == "12":  # Upload Image
             subject_id = input("Enter Subject ID: ").strip()
