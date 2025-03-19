@@ -86,7 +86,7 @@ def get_patient(subject_id):
     results = run_query(query)
     data = [list(row.values()) for row in results]
     headers = ["Subject ID", "Gender", "Date of Birth"]
-    return render_html_table("Patient Details for patient {subject_id}", data, headers)
+    return render_html_table(f"Patient Details for patient {subject_id}", data, headers)
 
 # 2. LIST ALL ADMISSIONS FOR A PATIENT (HTML Table)
 @app.route("/rest/admissions/<int:subject_id>", methods=["GET"])
@@ -395,12 +395,17 @@ def list_all_images():
     # Debug: Verifique o que está sendo retornado do BigQuery
     print("Result from BigQuery:", result)
     
-    images = [{"subject_id": row["subject_id"], "image_name": row["image_name"], "image_url": row["image_url"]} for row in result]
-
+    images = [
+        {
+            "subject_id": row["subject_id"],
+            "image_name": row["image_name"],
+            "image_url": row["image_url"]
+        }
+        for row in result
+    ]
     if not images:
         return render_html_table("No Images Found", [], ["Subject ID", "Image Name", "Image URL"])
 
-    # Render the HTML table with the images data
     headers = ["Subject ID", "Image Name", "Image URL"]
     return render_html_table("All Stored Images", images, headers)
 
@@ -422,6 +427,52 @@ def download_image(image_name):
     signed_url = blob.generate_signed_url(expiration=600)  # Valid for 10 mins
 
     return jsonify({"image_url": signed_url})
+
+# 15. Create a new progress record
+@app.route("/rest/progress", methods=["POST"])
+def create_progress():
+    """Inserts a new progress record for a patient (medical intervention or test result)."""
+    data = request.json
+    if not data or "subject_id" not in data or "hadm_id" not in data or "itemid" not in data or "starttime" not in data:
+        return jsonify({"error": "Missing required fields"}), 400
+
+    insert_query = """
+    INSERT INTO `bdcc25-452114.DatasetBDCC.Progress` 
+    (subject_id, hadm_id, itemid, starttime, endtime, amount, amountuom, cgid, statusdescription)
+    VALUES 
+    (@subject_id, @hadm_id, @itemid, TIMESTAMP(@starttime), TIMESTAMP(@endtime), @amount, @amountuom, @cgid, @statusdescription)
+    """
+    params = [
+        bigquery.ScalarQueryParameter("subject_id", "INT64", data["subject_id"]),
+        bigquery.ScalarQueryParameter("hadm_id", "INT64", data["hadm_id"]),
+        bigquery.ScalarQueryParameter("itemid", "INT64", data["itemid"]),
+        bigquery.ScalarQueryParameter("starttime", "STRING", data["starttime"]),  # Convertido para STRING
+        bigquery.ScalarQueryParameter("endtime", "STRING", data.get("endtime", "")),  # Optional
+        bigquery.ScalarQueryParameter("amount", "FLOAT64", data["amount"]),
+        bigquery.ScalarQueryParameter("amountuom", "STRING", data["amountuom"]),
+        bigquery.ScalarQueryParameter("cgid", "INT64", data["cgid"]),
+        bigquery.ScalarQueryParameter("statusdescription", "STRING", data["statusdescription"])
+    ]
+    
+    run_query(insert_query, params)
+    return jsonify({"message": "Progress record added successfully", "data": data}), 201
+
+# 16. List all progress records for a patient
+@app.route("/rest/patients/<int:subject_id>/progress", methods=["GET"])
+def get_progress(subject_id):
+    """Fetches all progress records for a specific patient."""
+    query = """
+    SELECT hadm_id, itemid, starttime, endtime, amount, amountuom, cgid, statusdescription
+    FROM `bdcc25-452114.DatasetBDCC.Progress`
+    WHERE subject_id = @subject_id
+    ORDER BY starttime DESC
+    """
+    params = [bigquery.ScalarQueryParameter("subject_id", "INT64", subject_id)]
+    result = run_query(query, params)
+    
+    data = [list(row.values()) for row in result]
+    headers = ["HADM ID", "Item ID", "Start Time", "End Time", "Amount", "Amount Unit", "Caregiver ID", "Status Description"]
+    return render_html_table(f"Progress Records for Patient {subject_id}", data, headers)
 
 # START SERVER
 if __name__ == "__main__":
