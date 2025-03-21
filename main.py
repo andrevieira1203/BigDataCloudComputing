@@ -1,64 +1,72 @@
 import functions_framework
-import requests
+import json
 from google.cloud import bigquery
 from google.cloud import storage
+from datetime import datetime, timedelta
 
-# Set up Google Cloud Storage and BigQuery clients
-storage_client = storage.Client()
+# Initialize Google Cloud clients
 bigquery_client = bigquery.Client()
+storage_client = storage.Client()
 
-# The Cloud Function entry point
+# Set up your dataset and table
+dataset_id = "DatasetBDCC"
+table_id = "Patients"  # Example, update as per your need
+full_table_id = f"bdcc25-452114.{dataset_id}.{table_id}"
+
+# Cloud Function entry point
 @functions_framework.http
 def faas(request):
     """
-    Your Google Cloud Function entry point.
-    Perform tasks such as database updates, periodic jobs, etc.
+    Google Cloud Function to perform tasks such as:
+    - Periodic computation (e.g., garbage collection)
+    - Update tasks (e.g., updating patient status based on long stays)
     """
 
-    # Parse the incoming request
-    request_json = request.get_json(silent=True)
-    request_args = request.args
+    try:
+        # 1. Example: Get Patients with Long Stays (Update or cleanup task)
+        query_long_stays = """
+        SELECT subject_id, hadm_id, admittime, dischtime, 
+               TIMESTAMP_DIFF(dischtime, admittime, DAY) AS stay_days
+        FROM `bdcc25-452114.DatasetBDCC.Admissions`
+        WHERE dischtime IS NOT NULL
+        AND TIMESTAMP_DIFF(dischtime, admittime, DAY) > 30
+        ORDER BY stay_days DESC
+        """
+        
+        # Execute query to get long stay patients
+        results_long_stays = bigquery_client.query(query_long_stays).result()
 
-    if request_json and 'subject_id' in request_json:
-        subject_id = request_json['subject_id']
-        hadm_id = request_json.get('hadm_id', None)
-        itemid = request_json.get('itemid', None)
-        starttime = request_json.get('starttime', None)
-        endtime = request_json.get('endtime', None)
-        amount = request_json.get('amount', None)
-        amountuom = request_json.get('amountuom', None)
-        statusdescription = request_json.get('statusdescription', None)
-        cgid = request_json.get('cgid', None)
+        long_stay_patients = []
+        for row in results_long_stays:
+            long_stay_patients.append({
+                "subject_id": row["subject_id"],
+                "hadm_id": row["hadm_id"],
+                "admittime": row["admittime"],
+                "dischtime": row["dischtime"],
+                "stay_days": row["stay_days"]
+            })
+        
+        # 2. Garbage Collection: Clean up old data (e.g., delete inactive records)
+        # Clean up records older than 1 year, for example
+        one_year_ago = (datetime.utcnow() - timedelta(days=365)).strftime("%Y-%m-%d")
 
-        # Process the data (this is just an example logic)
-        if subject_id and hadm_id and itemid:
-            try:
-                # Example logic: Insert progress record into BigQuery
-                query = """
-                INSERT INTO `planar-unity-416918.DatasetBDCC.PROGRESS` 
-                (subject_id, hadm_id, itemid, starttime, endtime, amount, amountuom, cgid, statusdescription)
-                VALUES 
-                (@subject_id, @hadm_id, @itemid, TIMESTAMP(@starttime), TIMESTAMP(@endtime), @amount, @amountuom, @cgid, @statusdescription)
-                """
-                params = [
-                    bigquery.ScalarQueryParameter("subject_id", "INT64", subject_id),
-                    bigquery.ScalarQueryParameter("hadm_id", "INT64", hadm_id),
-                    bigquery.ScalarQueryParameter("itemid", "INT64", itemid),
-                    bigquery.ScalarQueryParameter("starttime", "STRING", starttime),  # Convert to STRING if needed
-                    bigquery.ScalarQueryParameter("endtime", "STRING", endtime),  # Convert to STRING if needed
-                    bigquery.ScalarQueryParameter("amount", "FLOAT64", amount),
-                    bigquery.ScalarQueryParameter("amountuom", "STRING", amountuom),
-                    bigquery.ScalarQueryParameter("cgid", "INT64", cgid),
-                    bigquery.ScalarQueryParameter("statusdescription", "STRING", statusdescription),
-                ]
+        query_gc = f"""
+        DELETE FROM `bdcc25-452114.DatasetBDCC.Patients`
+        WHERE dob < '{one_year_ago}'
+        """
+        
+        # Execute query for garbage collection
+        bigquery_client.query(query_gc).result()
 
-                # Execute query
-                bigquery_client.query(query, job_config=bigquery.QueryJobConfig(query_parameters=params))
+        # Build the HTML table response for better visualization
+        html_response = "<html><body><h2>Processed Long Stays and Garbage Collection</h2><table border='1'><tr><th>Patient ID</th><th>Admission ID</th><th>Admission Time</th><th>Discharge Time</th><th>Stay Days</th></tr>"
 
-                return "Progress record added successfully!", 200
-            except Exception as e:
-                return f"Error: {str(e)}", 500
-        else:
-            return "Missing required fields", 400
-    else:
-        return "Invalid JSON", 400
+        for patient in long_stay_patients:
+            html_response += f"<tr><td>{patient['subject_id']}</td><td>{patient['hadm_id']}</td><td>{patient['admittime']}</td><td>{patient['dischtime']}</td><td>{patient['stay_days']}</td></tr>"
+
+        html_response += "</table><p>Garbage collection executed successfully: Deleted patients older than 1 year.</p></body></html>"
+
+        return html_response
+
+    except Exception as e:
+        return f"<html><body><h2>Error</h2><p>{str(e)}</p></body></html>", 500
