@@ -22,6 +22,7 @@ full_table_id = f"bdcc25-452114.{dataset_id}.{table_id}"
 # Initialize the Google Cloud Storage client
 bucket = storage_client.bucket(BUCKET_NAME)
 
+# Initialize Flask web application
 app = Flask(__name__)
 bigquery_client = bigquery.Client()
 
@@ -141,18 +142,18 @@ def create_patient():
     if not data:
         return jsonify({"error": "No data received"}), 400
 
-    # Converter `dob` de "YYYY-MM-DD" para TIMESTAMP no BigQuery
+    # Convert `dob` from "YYYY-MM-DD" to TIMESTAMP in BigQuery
     dob_timestamp = f"{data['dob']} 00:00:00"
 
-    # Verificar se o paciente já existe
+    # Check if patient already exists
     check_query = "SELECT subject_id FROM `bdcc25-452114.DatasetBDCC.Patients` WHERE subject_id = @subject_id"
     params = [bigquery.ScalarQueryParameter("subject_id", "INT64", data['subject_id'])]
     existing = run_query(check_query, params)
 
     if existing.total_rows > 0:
-        return jsonify({"error": "Patient already exists"}), 409  # HTTP 409 Conflict
+        return jsonify({"error": "Patient already exists"}), 409 
 
-    # Inserir paciente convertendo DOB para TIMESTAMP corretamente
+    # Insert patient by converting DOB to TIMESTAMP correctly
     insert_query = """
     INSERT INTO `bdcc25-452114.DatasetBDCC.Patients` (subject_id, gender, dob)
     VALUES (@subject_id, @gender, TIMESTAMP(@dob))
@@ -160,7 +161,7 @@ def create_patient():
     params = [
         bigquery.ScalarQueryParameter("subject_id", "INT64", data['subject_id']),
         bigquery.ScalarQueryParameter("gender", "STRING", data['gender']),
-        bigquery.ScalarQueryParameter("dob", "STRING", dob_timestamp)  # Agora como STRING formatada
+        bigquery.ScalarQueryParameter("dob", "STRING", dob_timestamp) 
     ]
     run_query(insert_query, params)
 
@@ -175,18 +176,17 @@ def create_admission():
     if not data:
         return jsonify({"error": "No data received"}), 400
 
-    # Converter `dob` de "YYYY-MM-DD" para TIMESTAMP no BigQuery
     dob_timestamp2 = f"{data['admittime']}"
     dob_timestamp3 = f"{data['dischtime']}"
 
 
-    # Verificar se a admission já existe
+    # Check if admission already exists
     check_query = "SELECT subject_id FROM `bdcc25-452114.DatasetBDCC.Admissions` WHERE hadm_id = @hadm_id"
     params = [bigquery.ScalarQueryParameter("hadm_id", "INT64", data['hadm_id'])]
     existing = run_query(check_query, params)
 
     if existing.total_rows > 0:
-        return jsonify({"error": "Admission already exists"}), 409  # HTTP 409 Conflict
+        return jsonify({"error": "Admission already exists"}), 409  
 
     insert_query = """
     INSERT INTO `bdcc25-452114.DatasetBDCC.Admissions` (hadm_id, subject_id, admittime, dischtime, diagnosis)
@@ -249,7 +249,7 @@ def update_patient(subject_id):
 def delete_patient(subject_id):
     """Deletes a patient and anonymizes their admissions."""
 
-    # Primeiro, verificar se o paciente existe
+    # First, check if the patient exists
     check_query = "SELECT subject_id FROM `bdcc25-452114.DatasetBDCC.Patients` WHERE subject_id = @subject_id"
     params = [bigquery.ScalarQueryParameter("subject_id", "INT64", subject_id)]
     existing = run_query(check_query, params)
@@ -264,7 +264,7 @@ def delete_patient(subject_id):
     """
     run_query(anonymize_admissions_query, params)
 
-    # Excluir o paciente
+    # Delete the patient
     delete_patient_query = """
     DELETE FROM `bdcc25-452114.DatasetBDCC.Patients`
     WHERE subject_id = @subject_id
@@ -278,7 +278,7 @@ def delete_patient(subject_id):
 def delete_admission(hadm_id):
     """Deletes a admission."""
 
-    # Primeiro, verificar se o admission existe
+    # First, check if the admission exists
     check_query = "SELECT hadm_id FROM `bdcc25-452114.DatasetBDCC.Admissions` WHERE hadm_id = @hadm_id"
     params = [bigquery.ScalarQueryParameter("hadm_id", "INT64", hadm_id)]
     existing = run_query(check_query, params)
@@ -286,7 +286,7 @@ def delete_admission(hadm_id):
     if existing.total_rows == 0:
         return jsonify({"error": "Admission not found"}), 404
 
-    # Excluir o paciente
+    # Delete the patient
     delete_admission_query = """
     DELETE FROM `bdcc25-452114.DatasetBDCC.Admissions`
     WHERE hadm_id = @hadm_id
@@ -302,7 +302,7 @@ def create_question(subject_id):
     if not data or "user_name" not in data or "question_text" not in data:
         return jsonify({"error": "Missing required fields"}), 400
 
-    print(f"Received question for subject {subject_id}: {data['question_text']}")  # Adicionando um log
+    print(f"Received question for subject {subject_id}: {data['question_text']}")  # Add a log
 
     insert_query = """
         INSERT INTO `bdcc25-452114.DatasetBDCC.Questions` (question_id, subject_id, user_name, question_text, created_at)
@@ -326,7 +326,7 @@ def create_question(subject_id):
     return jsonify({"message": "Question added successfully", "data": data}), 201
 
 
-# 11. Listar todas as perguntas de um paciente em formato de tabela HTML
+# 11. List all questions for a patient in HTML table format
 @app.route("/rest/patients/<int:subject_id>/questions", methods=["GET"])
 def get_questions(subject_id):
     """Retorna todas as perguntas feitas a um paciente."""
@@ -390,24 +390,25 @@ def list_all_images():
     ORDER BY subject_id ASC
     """
 
+    # Execute the query in BigQuery
     result = run_query(query)
-    
-    # Debug: Verifique o que está sendo retornado do BigQuery
+
+    # Check the returned data
     print("Result from BigQuery:", result)
-    
-    images = [
-        {
-            "subject_id": row["subject_id"],
-            "image_name": row["image_name"],
-            "image_url": row["image_url"]
-        }
-        for row in result
-    ]
+
+    if not result:
+        return render_html_table("No Images Found", [], ["Subject ID", "Image Name", "Image URL"])
+
+    # Process the results
+    images = [{"subject_id": row["subject_id"], "image_name": row["image_name"], "image_url": row["image_url"]} for row in result]
+
     if not images:
         return render_html_table("No Images Found", [], ["Subject ID", "Image Name", "Image URL"])
 
+    # Render the HTML table
     headers = ["Subject ID", "Image Name", "Image URL"]
     return render_html_table("All Stored Images", images, headers)
+
 
 
 # 14. Download all the images
@@ -446,8 +447,8 @@ def create_progress():
         bigquery.ScalarQueryParameter("subject_id", "INT64", data["subject_id"]),
         bigquery.ScalarQueryParameter("hadm_id", "INT64", data["hadm_id"]),
         bigquery.ScalarQueryParameter("itemid", "INT64", data["itemid"]),
-        bigquery.ScalarQueryParameter("starttime", "STRING", data["starttime"]),  # Convertido para STRING
-        bigquery.ScalarQueryParameter("endtime", "STRING", data.get("endtime", "")),  # Optional
+        bigquery.ScalarQueryParameter("starttime", "STRING", data["starttime"]), 
+        bigquery.ScalarQueryParameter("endtime", "STRING", data.get("endtime", "")),  
         bigquery.ScalarQueryParameter("amount", "FLOAT64", data["amount"]),
         bigquery.ScalarQueryParameter("amountuom", "STRING", data["amountuom"]),
         bigquery.ScalarQueryParameter("cgid", "INT64", data["cgid"]),

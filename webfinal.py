@@ -3,7 +3,7 @@ import requests
 import json
 import os
 
-# Dicionário de endpoints organizado por tabela
+# Endpoint dictionary organized by table
 endpoints = {
     # USERS Endpoints
     "Users": {
@@ -43,7 +43,7 @@ endpoints = {
 }
 
 def send_request(method, url, data=None):
-    """Envia requisições HTTP e imprime a resposta."""
+    """Endpoint dictionary organized by table."""
     try:
         headers = {"Content-Type": "application/json"}
 
@@ -159,12 +159,12 @@ def get_user_choice():
                     "question_text": question_text
                 }
 
-                # Enviar requisição POST para o Flask
-                url = f"http://127.0.0.1:8080/rest/patients/{subject_id}/question"  # O endpoint para criar a questão
+                # Send POST request to Flask
+                url = f"http://127.0.0.1:8080/rest/patients/{subject_id}/question"  # The endpoint to create the issue
                 
             elif endpoint_choice == "12":  # Upload Image
                 subject_id = input("Enter Subject ID: ").strip()
-                file_path = input("Enter the full path to the image file: ").strip().strip('"')  # Remove surrounding quotes
+                file_path = input("Enter the full path to the image file: ").strip().strip('"') 
 
                 try:
                     with open(file_path, "rb") as image_file:
@@ -186,20 +186,20 @@ def get_user_choice():
                 if not image_name:
                     print("❌ Image name is required!")
                 else:
-                    # Usando o link autenticado fornecido
+                    # Using the provided authenticated link
                     signed_url = f"https://storage.cloud.google.com/bdcc-imagebucket25/{image_name}"
 
-                    # Enviar a solicitação para baixar a imagem
+                    # Send the request to download the image
                     response = requests.get(signed_url, stream=True)
 
                     if response.status_code == 200:
-                        # Caminho onde a imagem será salva (na área de trabalho)
+                        # Path where the image will be saved (on the desktop)
                         desktop_path = os.path.join(os.path.expanduser("~/Desktop"), image_name)
 
-                        # Garantir que o diretório exista
+                        # Ensure the directory exists
                         os.makedirs(os.path.dirname(desktop_path), exist_ok=True)
 
-                        # Salvar a imagem na área de trabalho
+                        # Save the image to your desktop
                         with open(desktop_path, "wb") as file:
                             for chunk in response.iter_content(1024):
                                 file.write(chunk)

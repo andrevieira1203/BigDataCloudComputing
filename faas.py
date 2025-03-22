@@ -46,7 +46,7 @@ def faas(request):
                 "stay_days": row["stay_days"]
             })
         
-        # 2. Garbage Collection: Clean up old data (e.g., delete inactive records)
+        # 2. Garbage Collection: Clean up old data 
         # Clean up records older than 1 year, for example
         one_year_ago = (datetime.utcnow() - timedelta(days=365)).strftime("%Y-%m-%d")
 
