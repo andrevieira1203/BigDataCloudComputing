@@ -1,59 +1,122 @@
 config:
-  target: 'https://us-central1-bdcc25-452114.cloudfunctions.net/faas'  
+  target: 'https://us-central1-bdcc25-452114.cloudfunctions.net/faas' 
   phases:
-    - duration: 60 
+    - duration: 60
       arrivalRate: 10  
     - duration: 120
-      arrivalRate: 50  
+      arrivalRate: 50
     - duration: 180
-      arrivalRate: 100 
+      arrivalRate: 100
 
 scenarios:
+  # Testing the FaaS function
+  - flow:
+      - get:
+          url: "/faas"  
+
+  # 1. Get Patient Details
+  - flow:
+      - get:
+          url: "/rest/patients/12613" 
+
+  # 2. Get Patients with Longest Stays
+  - flow:
+      - get:
+          url: "/rest/patients/longest_stays"
+
+  # 3. Create a New Patient
   - flow:
       - post:
-          url: "/"
+          url: "/rest/patients"
           json:
-            subject_id: 12613  # Long stay
+            subject_id: 12613
+            gender: "M"
+            dob: "1980-10-10"  # Exemplo de dados para criação do paciente
+
+  # 4. Update Patient Details
+  - flow:
+      - put:
+          url: "/rest/patients/12613"  # Substitua pelo ID do paciente a ser atualizado
+          json:
+            gender: "F"  # Exemplo de dado a ser atualizado
+            dob: "1985-10-10"
+
+  # 5. Delete a Patient
+  - flow:
+      - delete:
+          url: "/rest/patients/12613"  # Substitua pelo ID do paciente a ser deletado
+
+  # 6. List All Patients
+  - flow:
+      - get:
+          url: "/rest/patients"
+
+  # 7. Get Admissions for a Patient
+  - flow:
+      - get:
+          url: "/rest/admissions/12613"  # Substitua pelo ID do paciente
+
+  # 8. Create a New Admission
+  - flow:
+      - post:
+          url: "/rest/admissions"
+          json:
             hadm_id: 168201
+            subject_id: 12613
+            admittime: "2135-12-27T21:39:00+00:00"
+            dischtime: "2136-10-17T13:30:00+00:00"
+            diagnosis: "Heart Surgery"
+
+  # 9. Delete an Admission
+  - flow:
+      - delete:
+          url: "/rest/admissions/168201"  # Substitua pelo ID da admissão a ser deletada
+
+  # 10. Upload Image
+  - flow:
+      - post:
+          url: "/rest/upload_image"
+          formData:
+            image: "@Captura de ecrã 2023-11-25 143641.jpg"  # Certifique-se de ter uma imagem para testar
+
+  # 11. Download Image
+  - flow:
+      - get:
+          url: "/rest/media/some_image.jpg"  # Substitua pelo nome da imagem a ser baixada
+
+  # 12. List All Images
+  - flow:
+      - get:
+          url: "/rest/media"
+
+  # 13. Create Progress Record
+  - flow:
+      - post:
+          url: "/rest/progress"
+          json:
+            subject_id: 12613
+            hadm_id: 168201
+            itemid: 123
             starttime: "2135-12-27T21:39:00+00:00"
             endtime: "2136-10-17T13:30:00+00:00"
+            amount: 50
+            amountuom: "mg"
+            statusdescription: "Ongoing recovery"
+
+  # 14. List Progress Records for a Patient
+  - flow:
+      - get:
+          url: "/rest/patients/12613/progress"
+
+  # 15. Create a Question
   - flow:
       - post:
-          url: "/"
+          url: "/rest/patients/12613/question"
           json:
-            subject_id: 9025  # Long stay
-            hadm_id: 147501
-            starttime: "2164-06-15T00:22:00+00:00"
-            endtime: "2165-01-03T18:40:00+00:00"
+            user_name: "doctor_john"
+            question_text: "What is the patient's diagnosis?"
+
+  # 16. List Questions for a Patient
   - flow:
-      - post:
-          url: "/"
-          json:
-            subject_id: 13197  # Medium stay
-            hadm_id: 185541
-            starttime: "2154-06-19T13:15:00+00:00"
-            endtime: "2154-08-22T19:00:00+00:00"
-  - flow:
-      - post:
-          url: "/"
-          json:
-            subject_id: 24915  # Medium stay
-            hadm_id: 194424
-            starttime: "2182-11-11T01:00:00+00:00"
-            endtime: "2183-01-15T15:00:00+00:00"
-  - flow:
-      - post:
-          url: "/"
-          json:
-            subject_id: 95610  # Short stay
-            hadm_id: 164181
-            starttime: "2181-01-03T18:43:00+00:00"
-            endtime: "2181-02-07T13:27:00+00:00"
-  - flow:
-      - post:
-          url: "/"
-          json:
-            subject_id: 25725  # Short stay
-            hadm_id: 168383
-            starttime: "2120-07-22T07:45:00+00:00"
-            endtime: "2120-08-22T11:44:00+00:00"
+      - get:
+          url: "/rest/patients/12613/questions"
